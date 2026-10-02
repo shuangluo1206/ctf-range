@@ -22,8 +22,12 @@ app/
     ├── users.py           # 注册/登录/积分榜/Webhook 注册
     ├── challenges.py      # 环境生命周期 + 续期
     ├── submissions.py     # flag 提交（风控三道闸收口）
+    ├── catalog.py         # 题目目录（描述不含漏洞类型——识别漏洞是考点）
     └── ws.py              # WebSocket 连接鉴权（token → 私有房间）
 challenges/                 # 自制靶机镜像（含 Dockerfile）
+agent/                      # 机器人选手（第6关：LLM 自动解题）
+├── agent_core.py          # RangeClient（选手动作）+ LLMBrain（OpenAI兼容 function calling）
+└── play.py                # CLI 入口（--mock 规则选手 / LLM 选手）
 static/                     # 简易前端（登录/开环境/提交flag/实时通知）
 run.py                      # 启动入口（socketio.run，同端口服务 HTTP + WebSocket）
 ```
@@ -39,6 +43,7 @@ run.py                      # 启动入口（socketio.run，同端口服务 HTTP
 | `GET/DELETE /challenges/{id}` | 查看/销毁自己的环境（幂等） |
 | `POST /challenges/{id}/extend` | 续期：重置 TTL |
 | `POST /submissions` | 提交 flag 判分 |
+| `GET /catalog` | 题目目录（公开） |
 | `GET /` | 简易前端页面 |
 
 **风控防作弊三道闸**（收口在 submissions 路由）：登录鉴权 → 归属校验（只能提交自己环境的 flag，抄别人的 403）→ 滑动窗口限流（10次/60秒防爆破）；另有每人环境数配额（3个）和同环境防重复计分。
@@ -46,6 +51,19 @@ run.py                      # 启动入口（socketio.run，同端口服务 HTTP
 **WebSocket 事件**（连接时带 `?token=` 进私有房间）：`env_created` / `env_expiring`（临期预警）/ `env_reaped` / `env_extended` / `env_deleted` / `submission_result` / `scoreboard`（答对全站广播）。
 
 **Webhook**：用户注册回调地址后，答对等事件异步 POST 到该地址（失败不重试，可靠送达需消息队列，当前规模故意不上）。
+
+**Agent 评测沙箱**（第6关）：`agent/` 里的机器人选手走和人类**完全相同**的 API——开环境、打靶机、提交 flag，风控对机器人一视同仁，解出即自动上榜。
+
+```bash
+# 规则脚本选手（不用 LLM，验证闭环）
+python3 agent/play.py --user bot-rule --challenge sqli-login --mock
+
+# LLM 选手（OpenAI 兼容接口；题目描述不含漏洞类型，模型要自己侦察）
+export LLM_BASE_URL=... LLM_API_KEY=... LLM_MODEL=...
+python3 agent/play.py --user bot-ernie --challenge sqli-login
+```
+
+对局报告（solved / turns / 用时 / 全程工具调用轨迹）输出为 JSON，可直接喂给评测分析。实测：ernie-4.5-turbo 在不知漏洞类型的情况下，4 轮解出 sqli-login（侦察页面 → 构造注入 → 提取 flag → 提交）。
 
 ## 设计约定
 
@@ -72,5 +90,5 @@ python3 run.py             # :8000，浏览器打开 http://127.0.0.1:8000
 - [x] 第 3 关：用户会话 + flag 归属校验 + 提交频率限制（风控防作弊）
 - [x] 第 4 关：生命周期管理，超时自动回收（TTL + 回收线程 + 续期接口）
 - [x] 第 5 关：WebSocket 实时推送 + Webhook + 简易前端
-- [ ] 第 6 关：接 AI Agent 自动解题 + 自动打分（Agent 评测沙箱）
+- [x] 第 6 关：接 AI Agent 自动解题 + 自动打分（Agent 评测沙箱）
 - [ ] 第 7 关：调度层换 K8s（Job/Pod + Service）

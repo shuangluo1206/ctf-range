@@ -1,6 +1,7 @@
 """应用工厂：注册蓝图，方便后续挂 Webhook / WebSocket 模块（JD：方便功能拓展）"""
 from flask import Flask
 
+from .api.catalog import bp as catalog_bp
 from .api.challenges import bp as challenges_bp
 from .api.submissions import bp as submissions_bp
 from .api.users import bp as users_bp
@@ -10,6 +11,7 @@ from .state import socketio
 def create_app() -> Flask:
     # static 放仓库根的 static/，第5关的简易前端从这出
     app = Flask(__name__, static_folder="../static", static_url_path="/static")
+    app.register_blueprint(catalog_bp)
     app.register_blueprint(users_bp)
     app.register_blueprint(challenges_bp)
     app.register_blueprint(submissions_bp)
