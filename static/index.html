@@ -45,6 +45,7 @@
   <div id="bar" class="card">
     <span>👤 <b id="who"></b></span>
     <span class="dim">|</span>
+    <select id="pick" style="background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:6px"></select>
     <button onclick="createEnv()">＋ 开环境</button>
     <button class="ghost" onclick="logout()">退出</button>
     <span class="dim" style="margin-left:auto" id="ws-state">WebSocket: 连接中…</span>
@@ -115,7 +116,14 @@ function enter() {
   document.getElementById('auth').style.display = 'none';
   document.getElementById('main').style.display = '';
   document.getElementById('who').textContent = me;
-  connectWS(); refreshAll();
+  connectWS(); refreshAll(); loadCatalog();
+}
+
+// ---------- 题目目录 ----------
+async function loadCatalog() {
+  const cat = await api('/catalog');
+  document.getElementById('pick').innerHTML = cat.map(c =>
+    `<option value="${c.image}">${c.title}（${c.difficulty}）</option>`).join('');
 }
 
 // ---------- WebSocket ----------
@@ -142,8 +150,10 @@ function push(cls, text) {
 
 // ---------- 业务 ----------
 async function createEnv() {
-  const d = await api('/challenges', {method:'POST', body:{}});
+  const image = document.getElementById('pick')?.value || undefined;
+  const d = await api('/challenges', {method:'POST', body: image ? {image} : {}});
   if (d.error) { alert(d.error); return; }
+  push('info', `环境就绪，靶机地址 <a href="http://127.0.0.1:${d.port}" target="_blank" style="color:#7dd3fc">http://127.0.0.1:${d.port}</a>`);
   refreshAll();
 }
 async function delEnv(id) { await api('/challenges/' + id, {method:'DELETE'}); refreshAll(); }
