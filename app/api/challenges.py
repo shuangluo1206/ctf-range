@@ -1,41 +1,45 @@
-"""challenges 路由：HTTP API 层，只做参数校验和转发，业务在 ChallengeManager"""
+"""challenges 路由：环境生命周期（第3关起必须登录，环境归属当前用户）"""
 from flask import Blueprint, jsonify, request
 
-from ..challenge_manager import ChallengeManager
+from ..auth import require_auth
+from ..state import challenge_manager
 
 bp = Blueprint("challenges", __name__)
 
-# 单例：整个应用共用一个登记表
-manager = ChallengeManager()
-
 
 @bp.post("/challenges")
-def create_challenge():
+@require_auth
+def create_challenge(username: str):
     body = request.get_json(silent=True) or {}
     image = body.get("image")  # 可选，缺省用配置里的默认镜像
     try:
-        info = manager.create(image)
+        info = challenge_manager.create(username, image)
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 429
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 400
     return jsonify(info), 201
 
 
 @bp.get("/challenges")
-def list_challenges():
-    return jsonify(manager.list())
+@require_auth
+def list_challenges(username: str):
+    return jsonify(challenge_manager.list(username))
 
 
 @bp.get("/challenges/<challenge_id>")
-def get_challenge(challenge_id: str):
-    info = manager.get(challenge_id)
+@require_auth
+def get_challenge(username: str, challenge_id: str):
+    info = challenge_manager.get_public(challenge_id, username)
     if not info:
         return jsonify({"error": "challenge 不存在"}), 404
     return jsonify(info)
 
 
 @bp.delete("/challenges/<challenge_id>")
-def delete_challenge(challenge_id: str):
-    info = manager.delete(challenge_id)
+@require_auth
+def delete_challenge(username: str, challenge_id: str):
+    info = challenge_manager.delete(username, challenge_id)
     if not info:
-        return jsonify({"error": "challenge 不存在"}), 404
+        return jsonify({"error": "challenge 不存在或不是你的"}), 404
     return jsonify({"deleted": challenge_id})

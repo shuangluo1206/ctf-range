@@ -7,6 +7,10 @@ DEFAULT_IMAGE = os.getenv("RANGE_IMAGE", "nginx:alpine")
 # 动态端口分配范围
 PORT_RANGE = (9100, 9999)
 
+# 风控参数（第3关）
+MAX_ENV_PER_USER = 3      # 每人最多同时持有的环境数（防薅资源）
+SUBMIT_RATE = (10, 60)    # 提交频率限制：每 60 秒最多 10 次（防爆破 flag）
+
 # 所有自建容器统一打这个标签：回收只认标签，绝不碰别人的容器
 RANGE_LABEL = {"ctf-range": "true"}
 
