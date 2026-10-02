@@ -43,3 +43,13 @@ def delete_challenge(username: str, challenge_id: str):
     if not info:
         return jsonify({"error": "challenge 不存在或不是你的"}), 404
     return jsonify({"deleted": challenge_id})
+
+
+@bp.post("/challenges/<challenge_id>/extend")
+@require_auth
+def extend_challenge(username: str, challenge_id: str):
+    """续期：重置 TTL（第4关，选手还在做题就别把他环境收了）"""
+    view = challenge_manager.extend(username, challenge_id)
+    if not view:
+        return jsonify({"error": "challenge 不存在或不是你的"}), 404
+    return jsonify(view)

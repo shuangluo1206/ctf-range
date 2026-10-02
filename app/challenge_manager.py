@@ -4,12 +4,17 @@
 - create 绑定归属用户（风控前提：谁的环境谁提交）
 - 对外输出不再包含 flag（防抄答案；flag 只留在服务端内存与容器环境变量里）
 - 每用户同时环境数上限（防薅资源）
+
+第4关改造：
+- 环境带 TTL（expires_at），到期由 EnvironmentReaper 自动回收
+- extend() 续期：选手还在做题就别把他环境收了
 """
 import socket
+import time
 import uuid
 from datetime import datetime
 
-from .config import DEFAULT_IMAGE, MAX_ENV_PER_USER, PORT_RANGE, RANGE_LABEL
+from .config import DEFAULT_IMAGE, ENV_TTL_SECONDS, MAX_ENV_PER_USER, PORT_RANGE, RANGE_LABEL
 from .docker_service import DockerService
 
 
@@ -67,15 +72,17 @@ class ChallengeManager:
             "flag": flag,   # 仅服务端内部使用，对外输出走 _public()
             "user": username,
             "created_at": datetime.now().isoformat(),
+            "expires_at": time.time() + ENV_TTL_SECONDS,  # epoch 秒，到期回收
         }
         self.challenges[challenge_id] = info
         self.used_ports.add(port)
         return self._public(info)
 
-    @staticmethod
-    def _public(info: dict) -> dict:
-        """对外视图：剔除 flag（第3关起 API 响应不再泄露答案）"""
-        return {k: v for k, v in info.items() if k != "flag"}
+    def _public(self, info: dict) -> dict:
+        """对外视图：剔除 flag（第3关起 API 响应不再泄露答案），换算剩余存活时间"""
+        view = {k: v for k, v in info.items() if k != "flag"}
+        view["expires_in_seconds"] = max(0, int(info["expires_at"] - time.time()))
+        return view
 
     def get(self, challenge_id: str) -> dict | None:
         """内部查询（含 flag），供判分用"""
@@ -97,12 +104,32 @@ class ChallengeManager:
     def list(self, username: str) -> list[dict]:
         return [self._public(i) for i in self.challenges.values() if i["user"] == username]
 
+    def extend(self, username: str, challenge_id: str) -> dict | None:
+        """续期：重置 TTL。选手还在做题就别把他环境收了"""
+        info = self.challenges.get(challenge_id)
+        if not info or info["user"] != username:
+            return None
+        info["expires_at"] = time.time() + ENV_TTL_SECONDS
+        return self._public(info)
+
+    def reap_expired(self) -> list[str]:
+        """回收所有超时环境：删容器、归还端口、释放该用户配额。返回被回收的 id 列表"""
+        now = time.time()
+        expired = [cid for cid, i in self.challenges.items() if i["expires_at"] <= now]
+        for cid in expired:
+            self._destroy(self.challenges[cid])
+        return expired
+
+    def _destroy(self, info: dict) -> None:
+        """销毁单个环境：删容器、归还端口、下登记表"""
+        self.challenges.pop(info["id"], None)
+        self.docker.remove(info["container_id"])
+        self.used_ports.discard(info["port"])
+
     def delete(self, username: str, challenge_id: str) -> dict | None:
         """销毁自己的环境：删容器、归还端口。幂等"""
         info = self.challenges.get(challenge_id)
         if not info or info["user"] != username:
             return None
-        self.challenges.pop(challenge_id, None)
-        self.docker.remove(info["container_id"])
-        self.used_ports.discard(info["port"])
+        self._destroy(info)
         return info
