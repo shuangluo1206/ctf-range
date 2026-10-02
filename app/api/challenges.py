@@ -2,7 +2,7 @@
 from flask import Blueprint, jsonify, request
 
 from ..auth import require_auth
-from ..state import challenge_manager
+from ..state import challenge_manager, notifier
 
 bp = Blueprint("challenges", __name__)
 
@@ -18,6 +18,7 @@ def create_challenge(username: str):
         return jsonify({"error": str(e)}), 429
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 400
+    notifier.emit(username, "env_created", info)  # 实时通知：环境就绪
     return jsonify(info), 201
 
 
@@ -42,6 +43,7 @@ def delete_challenge(username: str, challenge_id: str):
     info = challenge_manager.delete(username, challenge_id)
     if not info:
         return jsonify({"error": "challenge 不存在或不是你的"}), 404
+    notifier.emit(username, "env_deleted", {"id": challenge_id, "port": info["port"]})
     return jsonify({"deleted": challenge_id})
 
 
@@ -52,4 +54,5 @@ def extend_challenge(username: str, challenge_id: str):
     view = challenge_manager.extend(username, challenge_id)
     if not view:
         return jsonify({"error": "challenge 不存在或不是你的"}), 404
+    notifier.emit(username, "env_extended", view)
     return jsonify(view)

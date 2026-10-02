@@ -78,9 +78,12 @@ class ChallengeManager:
         self.used_ports.add(port)
         return self._public(info)
 
+    # 内部字段（flag、记账用的 warned、epoch 时间戳）不对外
+    _INTERNAL_KEYS = {"flag", "warned", "expires_at"}
+
     def _public(self, info: dict) -> dict:
-        """对外视图：剔除 flag（第3关起 API 响应不再泄露答案），换算剩余存活时间"""
-        view = {k: v for k, v in info.items() if k != "flag"}
+        """对外视图：剔除内部字段，换算剩余存活时间"""
+        view = {k: v for k, v in info.items() if k not in self._INTERNAL_KEYS}
         view["expires_in_seconds"] = max(0, int(info["expires_at"] - time.time()))
         return view
 
@@ -112,13 +115,16 @@ class ChallengeManager:
         info["expires_at"] = time.time() + ENV_TTL_SECONDS
         return self._public(info)
 
-    def reap_expired(self) -> list[str]:
-        """回收所有超时环境：删容器、归还端口、释放该用户配额。返回被回收的 id 列表"""
+    def reap_expired(self) -> list[dict]:
+        """回收所有超时环境：删容器、归还端口、释放该用户配额。返回被回收的对外视图（供通知）"""
         now = time.time()
         expired = [cid for cid, i in self.challenges.items() if i["expires_at"] <= now]
+        views = []
         for cid in expired:
-            self._destroy(self.challenges[cid])
-        return expired
+            info = self.challenges[cid]
+            views.append(self._public(info))
+            self._destroy(info)
+        return views
 
     def _destroy(self, info: dict) -> None:
         """销毁单个环境：删容器、归还端口、下登记表"""

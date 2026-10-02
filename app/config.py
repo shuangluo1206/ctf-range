@@ -16,6 +16,9 @@ SUBMIT_RATE = (10, 60)    # 提交频率限制：每 60 秒最多 10 次（防�
 ENV_TTL_SECONDS = int(os.getenv("RANGE_TTL", 3600))
 REAP_INTERVAL_SECONDS = int(os.getenv("RANGE_REAP_INTERVAL", 30))
 
+# 临期预警阈值（第5关）：剩余不足该秒数时推一次 env_expiring 通知
+RANGE_WARN_SECONDS = int(os.getenv("RANGE_WARN", 120))
+
 # 所有自建容器统一打这个标签：回收只认标签，绝不碰别人的容器
 RANGE_LABEL = {"ctf-range": "true"}
 

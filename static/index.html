@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ctf-range 靶场</title>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "PingFang SC", sans-serif; background: #0f172a; color: #e2e8f0; padding: 24px; }
+  h1 { font-size: 20px; margin-bottom: 16px; color: #38bdf8; }
+  h2 { font-size: 15px; margin: 16px 0 8px; color: #94a3b8; }
+  .row { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+  .card { background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 16px; }
+  input { background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; padding: 6px 10px; margin-right: 6px; }
+  button { background: #0ea5e9; border: none; border-radius: 4px; color: #fff; cursor: pointer; padding: 6px 14px; }
+  button:hover { background: #0284c7; }
+  button.warn { background: #ef4444; }
+  button.ghost { background: #334155; }
+  table { border-collapse: collapse; font-size: 13px; margin-top: 8px; width: 100%; }
+  th, td { border-bottom: 1px solid #334155; padding: 6px 10px; text-align: left; }
+  #feed { max-height: 300px; overflow-y: auto; font-size: 12px; list-style: none; }
+  #feed li { padding: 4px 0; border-bottom: 1px dashed #334155; font-family: monospace; }
+  .tag { border-radius: 3px; padding: 1px 6px; margin-right: 6px; font-size: 11px; }
+  .ok { background: #14532d; color: #4ade80; } .err { background: #7f1d1d; color: #fca5a5; }
+  .info { background: #1e3a5f; color: #7dd3fc; }
+  #bar { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+  .dim { color: #64748b; font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>🏁 ctf-range 动态靶场</h1>
+
+<!-- 未登录：注册/登录 -->
+<div id="auth" class="card" style="max-width:460px">
+  <h2>登录 / 注册</h2>
+  <input id="u" placeholder="用户名" style="width:120px">
+  <input id="p" type="password" placeholder="密码" style="width:120px">
+  <button onclick="login()">登录</button>
+  <button class="ghost" onclick="register()">注册</button>
+</div>
+
+<!-- 已登录：主界面 -->
+<div id="main" style="display:none">
+  <div id="bar" class="card">
+    <span>👤 <b id="who"></b></span>
+    <span class="dim">|</span>
+    <button onclick="createEnv()">＋ 开环境</button>
+    <button class="ghost" onclick="logout()">退出</button>
+    <span class="dim" style="margin-left:auto" id="ws-state">WebSocket: 连接中…</span>
+  </div>
+
+  <div class="row">
+    <div class="card" style="flex:1; min-width:340px">
+      <h2>我的环境</h2>
+      <table>
+        <thead><tr><th>ID</th><th>端口</th><th>剩余</th><th>镜像</th><th>操作</th></tr></thead>
+        <tbody id="envs"><tr><td colspan="5" class="dim">暂无环境，点「开环境」</td></tr></tbody>
+      </table>
+      <h2 style="margin-top:16px">提交 flag</h2>
+      <input id="cid" placeholder="环境 ID" style="width:130px">
+      <input id="flag" placeholder="flag{...}" style="width:220px">
+      <button onclick="submitFlag()">提交</button>
+    </div>
+
+    <div class="card" style="flex:1; min-width:280px">
+      <h2>积分榜</h2>
+      <table><tbody id="score"><tr><td class="dim">-</td></tr></tbody></table>
+      <h2 style="margin-top:16px">实时通知（WebSocket）</h2>
+      <ul id="feed"></ul>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let token = localStorage.getItem('token') || '';
+let me = localStorage.getItem('me') || '';
+let socket = null;
+
+// ---------- 基础 ----------
+async function api(path, opts = {}) {
+  const r = await fetch(API + path, {
+    ...opts,
+    headers: { 'Content-Type': 'application/json', ...(token ? {'Authorization': 'Bearer ' + token} : {}), ...(opts.headers||{}) },
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 401) { logout(); throw new Error('未登录'); }
+  return d;
+}
+
+// ---------- 登录态 ----------
+async function login() {
+  const u = document.getElementById('u').value, p = document.getElementById('p').value;
+  try { await api('/users/login', {method:'POST', body:{username:u, password:p}}); }
+  catch (e) { alert('用户名或密码错误'); return; }
+  const d = await api('/users/login', {method:'POST', body:{username:u, password:p}});
+  token = d.token; me = u;
+  localStorage.setItem('token', token); localStorage.setItem('me', me);
+  enter();
+}
+async function register() {
+  const u = document.getElementById('u').value, p = document.getElementById('p').value;
+  const d = await api('/users/register', {method:'POST', body:{username:u, password:p}});
+  if (d.error) { alert(d.error); return; }
+  login();
+}
+function logout() {
+  token = ''; me = '';
+  localStorage.removeItem('token'); localStorage.removeItem('me');
+  location.reload();
+}
+function enter() {
+  document.getElementById('auth').style.display = 'none';
+  document.getElementById('main').style.display = '';
+  document.getElementById('who').textContent = me;
+  connectWS(); refreshAll();
+}
+
+// ---------- WebSocket ----------
+function connectWS() {
+  socket = io('/?token=' + encodeURIComponent(token));
+  socket.on('connect',    () => wsState('✅ 已连接'));
+  socket.on('disconnect', () => wsState('❌ 断开'));
+  const feed = (cls, name) => (data) => push(cls, name + ' ' + JSON.stringify(data));
+  socket.on('env_created',        feed('ok',   '环境就绪'));
+  socket.on('env_expiring',       feed('info', '⏰ 临期'));
+  socket.on('env_reaped',         feed('err',  '已回收'));
+  socket.on('env_extended',       feed('info', '已续期'));
+  socket.on('env_deleted',       feed('dim', '已删除'));
+  socket.on('submission_result',  (d) => { push(d.solved ? 'ok' : 'err', (d.solved ? '🎉 答对' : '❌ 答错') + ' ' + (d.msg||'')); refreshAll(); });
+  socket.on('scoreboard',         (d) => renderScore(d));
+}
+function wsState(s) { document.getElementById('ws-state').textContent = 'WebSocket: ' + s; }
+function push(cls, text) {
+  const li = document.createElement('li');
+  li.innerHTML = `<span class="tag ${cls}">${new Date().toLocaleTimeString()}</span>${text}`;
+  const f = document.getElementById('feed');
+  f.prepend(li);
+}
+
+// ---------- 业务 ----------
+async function createEnv() {
+  const d = await api('/challenges', {method:'POST', body:{}});
+  if (d.error) { alert(d.error); return; }
+  refreshAll();
+}
+async function delEnv(id) { await api('/challenges/' + id, {method:'DELETE'}); refreshAll(); }
+async function extendEnv(id) { await api('/challenges/' + id + '/extend', {method:'POST'}); refreshAll(); }
+async function submitFlag() {
+  const d = await api('/submissions', {method:'POST', body:{
+    challenge_id: document.getElementById('cid').value,
+    flag: document.getElementById('flag').value }});
+  if (d.error) alert(d.error);
+}
+
+// ---------- 渲染 ----------
+async function refreshAll() {
+  const envs = await api('/challenges');
+  renderEnvs(envs);
+  renderScore(await api('/scoreboard'));
+}
+function renderEnvs(envs) {
+  const tb = document.getElementById('envs');
+  tb.innerHTML = envs.length ? '' : '<tr><td colspan="5" class="dim">暂无环境</td></tr>';
+  envs.forEach(e => {
+    const left = e.expires_in_seconds ?? 0;
+    tb.insertAdjacentHTML('beforeend', `<tr>
+      <td>${e.id}</td><td>:${e.port}</td>
+      <td>${Math.floor(left/60)}分${left%60}秒</td>
+      <td class="dim">${e.image}</td>
+      <td><button class="ghost" onclick="extendEnv('${e.id}')">续期</button>
+          <button class="warn" onclick="delEnv('${e.id}')">删</button></td>
+    </tr>`);
+  });
+}
+function renderScore(list) {
+  document.getElementById('score').innerHTML = (list||[]).map(
+    (r, i) => `<tr><td>${i+1}. ${r.username}</td><td align="right"><b>${r.score}</b> 分</td></tr>`
+  ).join('') || '<tr><td class="dim">-</td></tr>';
+}
+
+// 定时倒计时刷新
+setInterval(() => { if (token && me) refreshAll(); }, 5000);
+
+// 已有 token 直接进入
+if (token && me) enter();
+</script>
+</body>
+</html>

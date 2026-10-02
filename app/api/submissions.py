@@ -7,7 +7,7 @@
 from flask import Blueprint, jsonify, request
 
 from ..auth import require_auth
-from ..state import submission_manager, submit_limiter, user_manager
+from ..state import notifier, submission_manager, submit_limiter, user_manager
 
 bp = Blueprint("submissions", __name__)
 
@@ -31,6 +31,12 @@ def submit_flag(username: str):
     if result.get("solved"):
         user_manager.add_score(username)
         result["score"] = user_manager.users[username]["score"]
+        # 答对是全局事件：给本人发 Webhook + 全站刷新积分榜
+        notifier.webhook(username, "challenge_solved",
+                         {"challenge": challenge_id, "score": result["score"]})
+        notifier.broadcast("scoreboard", user_manager.scoreboard())
+    # 提交结果实时推送（无论对错）
+    notifier.emit(username, "submission_result", {"challenge": challenge_id, **result})
     return jsonify(result), status
 
 
