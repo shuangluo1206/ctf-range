@@ -44,7 +44,7 @@ python3 run.py             # :8000
 
 - [x] 第 0 关：理解容器（手动 run/删、-e 注入、同镜像多容器不同 flag）
 - [x] 第 1 关：Flask 容器 API（动态端口 + flag 注入 + 生命周期）
-- [ ] 第 2 关：自制靶机镜像（带真漏洞的小应用，flag 环境变量注入）
+- [x] 第 2 关：自制靶机镜像（challenges/sqli-login，sqlite 真 SQL 注入，flag 从环境变量读）
 - [ ] 第 3 关：用户会话 + flag 归属校验 + 提交频率限制（风控防作弊）
 - [ ] 第 4 关：生命周期管理，超时自动回收
 - [ ] 第 5 关：WebSocket 实时推送 + Webhook + 简易前端
