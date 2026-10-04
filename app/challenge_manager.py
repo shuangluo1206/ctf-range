@@ -8,7 +8,12 @@
 第4关改造：
 - 环境带 TTL（expires_at），到期由 EnvironmentReaper 自动回收
 - extend() 续期：选手还在做题就别把他环境收了
+
+第7关改造：
+- 调度后端可切换：RANGE_BACKEND=docker（默认）/ k8s（Pod+Service）
+  两套后端同接口，本类零改动——容器操作收敛在一层的收益在此兑现
 """
+import os
 import socket
 import time
 import uuid
@@ -22,7 +27,13 @@ class ChallengeManager:
     """管理 challenge 的完整生命周期"""
 
     def __init__(self):
-        self.docker = DockerService()
+        if os.getenv("RANGE_BACKEND", "docker") == "k8s":
+            from .kubernetes_service import KubernetesService
+            self.docker = KubernetesService(PORT_RANGE)
+            self.backend = "k8s"
+        else:
+            self.docker = DockerService()
+            self.backend = "docker"
         # 内存登记表：challenge_id -> 信息（含 flag，永不直接外泄）
         self.challenges: dict[str, dict] = {}
         self.used_ports: set[int] = set()
@@ -30,8 +41,11 @@ class ChallengeManager:
     def _find_free_port(self) -> int:
         """在配置范围内找一个未被本系统登记、系统层面也空闲的端口
 
-        注：bind 试探与 docker -p 之间存在微小竞态窗口，第4关治理
+        k8s 后端：由 KubernetesService._find_free_port 查集群 Service 占用
+        docker 后端：bind 试探与 docker -p 之间存在微小竞态窗口
         """
+        if self.backend == "k8s":
+            return self.docker._find_free_port()
         for port in range(*PORT_RANGE):
             if port in self.used_ports:
                 continue
@@ -55,18 +69,22 @@ class ChallengeManager:
         challenge_id = uuid.uuid4().hex[:12]
         flag = f"flag{{{uuid.uuid4().hex[:16]}}}"
         port = self._find_free_port()
-
-        container_id = self.docker.run(
+        # Pod 名 / 容器名统一用 ctf-{id}（k8s 里也是资源名）
+        workload_id = self.docker.run(
             image,
             name=f"ctf-{challenge_id}",
             port=port,
             env={"FLAG": flag},
             labels=RANGE_LABEL,
         )
+        if self.backend == "k8s":
+            # Pod Ready 才算就绪（KubernetesService 里已等 Running；再等端口可连）
+            self.docker.wait_ready(workload_id)
+            workload_id = workload_id  # k8s: workload_id 即 pod 名
 
         info = {
             "id": challenge_id,
-            "container_id": container_id,
+            "container_id": workload_id,  # docker: 容器短id / k8s: Pod 名
             "image": image,
             "port": port,
             "flag": flag,   # 仅服务端内部使用，对外输出走 _public()

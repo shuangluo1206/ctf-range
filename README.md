@@ -12,7 +12,8 @@ app/
 ├── config.py              # 集中配置（镜像、端口范围、风控参数、TTL，环境变量可覆盖）
 ├── state.py               # 共享单例集中地（防循环导入）
 ├── docker_service.py      # DockerService：容器操作唯一出口（SDK 隔离）
-├── challenge_manager.py   # ChallengeManager：登记表 + 端口分配 + 生命周期
+├── kubernetes_service.py  # KubernetesService：K8s 调度后端（与 DockerService 同接口）
+├── challenge_manager.py   # ChallengeManager：登记表 + 端口分配 + 生命周期（RANGE_BACKEND 切换调度层）
 ├── user_manager.py        # UserManager：注册/登录/积分榜
 ├── submission_manager.py  # SubmissionManager：flag 判分 + 归属校验 + 防重复计分
 ├── rate_limiter.py        # RateLimiter：滑动窗口限流
@@ -79,7 +80,18 @@ pip3 install -r requirements.txt
 python3 run.py             # :8000，浏览器打开 http://127.0.0.1:8000
 ```
 
-环境变量：`RANGE_IMAGE`（默认镜像）、`RANGE_TTL`（环境存活秒数，默认 3600）、`RANGE_REAP_INTERVAL`（回收扫描周期）、`RANGE_WARN`（临期预警秒数）。
+**调度层切换**（第7关）：环境变量 `RANGE_BACKEND`，默认 docker。
+
+```bash
+# K8s 后端：每个环境 = 一个 Pod + 一个 Service(NodePort)
+# 本地推荐 kind（注意 extraPortMappings 把节点 30000-30009 映到宿主机 9100-9109，见 deploy/kind-config.yaml）
+RANGE_BACKEND=k8s python3 run.py
+```
+
+实测：LLM 选手在 K8s 后端上 4 轮解出 sqli-login（10.9s），与 docker 后端无差异——
+调度层替换对选手/业务零感知，这就是容器操作收敛在单一接口层的收益。
+
+环境变量：`RANGE_BACKEND`（docker/k8s）、`RANGE_IMAGE`（默认镜像）、`RANGE_TTL`（环境存活秒数，默认 3600）、`RANGE_REAP_INTERVAL`（回收扫描周期）、`RANGE_WARN`（临期预警秒数）。
 测试加速示例：`RANGE_TTL=8 RANGE_REAP_INTERVAL=2 python3 run.py`
 
 ## 通关计划
@@ -91,4 +103,4 @@ python3 run.py             # :8000，浏览器打开 http://127.0.0.1:8000
 - [x] 第 4 关：生命周期管理，超时自动回收（TTL + 回收线程 + 续期接口）
 - [x] 第 5 关：WebSocket 实时推送 + Webhook + 简易前端
 - [x] 第 6 关：接 AI Agent 自动解题 + 自动打分（Agent 评测沙箱）
-- [ ] 第 7 关：调度层换 K8s（Job/Pod + Service）
+- [x] 第 7 关：调度层换 K8s（Pod/Service，RANGE_BACKEND 一键切换，业务层零改动）
